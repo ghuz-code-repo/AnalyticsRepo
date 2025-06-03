@@ -1,0 +1,18 @@
+[submodule "call-center-service"]
+	path = call-center-service
+	url = https://github.com/ghuz-code-repo/call-center-service
+[submodule "discount-service"]
+	path = discount-service
+	url = https://github.com/ghuz-code-repo/discount-service
+[submodule "plan-fact"]
+	path = plan-fact
+	url = https://github.com/ghuz-code-repo/plan-fact
+[submodule "calculators-service"]
+	path = calculators-service
+	url = https://github.com/ghuz-code-repo/calculators-service
+[submodule "referal"]
+	path = referal
+	url = https://github.com/ghuz-code-repo/referal
+[submodule "!gateway"]
+	path = !gateway
+	url = https://github.com/ghuz-code-repo/-gateway
