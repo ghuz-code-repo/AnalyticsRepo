@@ -16,3 +16,6 @@
 [submodule "!gateway"]
 	path = !gateway
 	url = https://github.com/ghuz-code-repo/-gateway
+[submodule "auth-connector"]
+	path = auth-connector
+	url = .\\auth-connector\\

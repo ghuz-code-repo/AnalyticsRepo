@@ -1,1 +1,5 @@
 .vscode/*
+prod_backups/*
+migration_backup/*
+*.rar
+*.db
