@@ -4,4 +4,5 @@ migration_backup/*
 *.rar
 *.db
 READMEs/*
-
+*.exe
+*.env
