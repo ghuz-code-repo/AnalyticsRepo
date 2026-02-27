@@ -1,200 +1,251 @@
-# Script to start all Docker Compose services, starting with gateway
+# Golden House - Start All Services
+# Zapusk Docker Compose servisov v pravilnom poryadke
+#
+# Start order:
+#   1. Git pull all repositories
+#   2. !gateway (nginx + auth-service + mongo)
+#   3. Wait for gateway healthcheck
+#   4. !gateway/monitoring-service
+#   5. !gateway/notification-service
+#   6. client_service
+#   7. apartment_finder
+#   8. referal
+#   9. Final status
 
-# Base directory where all services are located
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Continue"
+
 $baseDir = $PSScriptRoot
-$processes = @()
-
-Write-Host "=== STARTING GOLDEN HOUSE SERVICES ===" -ForegroundColor Cyan
-
-# List all folders in the current directory
-Write-Host "Finding all service directories..." -ForegroundColor Cyan
-$allFolders = Get-ChildItem -Path $baseDir -Directory | Where-Object { $_.Name -ne ".git" }
-Write-Host "Found the following service directories:" -ForegroundColor White
-$allFolders | ForEach-Object { Write-Host "  - $($_.Name)" }
-
-# Step 1: Start Gateway First
 $gatewayDir = Join-Path -Path $baseDir -ChildPath "!gateway"
-if (Test-Path $gatewayDir) {
-    Write-Host "Starting Gateway first..." -ForegroundColor Green
-    
-    # Start gateway in the current window and wait
-    Push-Location $gatewayDir
-    Write-Host "Executing Docker Compose in Gateway directory..." -ForegroundColor Yellow
-    docker compose up --build -d
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Gateway services started successfully!" -ForegroundColor Green
-    } else {
-        Write-Host "Failed to start Gateway. Check errors above." -ForegroundColor Red
-        Pop-Location
-        Exit 1
+$startTime = Get-Date
+$failedServices = [System.Collections.ArrayList]::new()
+$succeededServices = [System.Collections.ArrayList]::new()
+
+# ----------------------------------------
+# Functions
+# ----------------------------------------
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host ""
+    Write-Host ">> $Message" -ForegroundColor Cyan
+}
+
+function Write-Ok {
+    param([string]$Message)
+    Write-Host "   [OK] $Message" -ForegroundColor Green
+}
+
+function Write-Fail {
+    param([string]$Message)
+    Write-Host "   [FAIL] $Message" -ForegroundColor Red
+}
+
+function Write-Info {
+    param([string]$Message)
+    Write-Host "   $Message" -ForegroundColor Yellow
+}
+
+function Update-Repository {
+    param(
+        [string]$RepoPath,
+        [string]$RepoName
+    )
+
+    $gitDir = Join-Path -Path $RepoPath -ChildPath ".git"
+    if (-not (Test-Path $gitDir)) {
+        Write-Info "$RepoName - not a git repo, skipping"
+        return
     }
-    Pop-Location
-    
-    # Small wait to ensure gateway is ready before other services
-    Start-Sleep -Seconds 3
-} else {
-    Write-Host "Gateway directory not found: $gatewayDir" -ForegroundColor Red
+
+    Write-Info "Git pull $RepoName..."
+    Push-Location $RepoPath
+    try {
+        git fetch --quiet 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "git fetch $RepoName"
+            return
+        }
+        git pull --quiet 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "git pull $RepoName"
+            return
+        }
+        Write-Ok "$RepoName updated"
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Start-DockerService {
+    param(
+        [string]$ServicePath,
+        [string]$ServiceName
+    )
+
+    $ymlPath = Join-Path $ServicePath "docker-compose.yml"
+    $yamlPath = Join-Path $ServicePath "docker-compose.yaml"
+    $hasCompose = (Test-Path $ymlPath) -or (Test-Path $yamlPath)
+
+    if (-not $hasCompose) {
+        Write-Fail "$ServiceName - docker-compose not found in $ServicePath"
+        $null = $script:failedServices.Add($ServiceName)
+        return $false
+    }
+
+    Write-Info "docker compose up --build -d [$ServiceName]..."
+    Push-Location $ServicePath
+    try {
+        docker compose up --build -d 2>&1 | ForEach-Object {
+            Write-Host "   $_" -ForegroundColor DarkGray
+        }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "$ServiceName started"
+            $null = $script:succeededServices.Add($ServiceName)
+            return $true
+        }
+        else {
+            Write-Fail "$ServiceName - docker compose failed"
+            $null = $script:failedServices.Add($ServiceName)
+            return $false
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Wait-ForHealthy {
+    param(
+        [string]$ContainerName,
+        [int]$TimeoutSeconds = 60
+    )
+
+    Write-Info "Waiting for healthcheck $ContainerName (timeout ${TimeoutSeconds}s)..."
+    $elapsed = 0
+    $fmt = '{{.State.Health.Status}}'
+    $health = "unknown"
+    while ($elapsed -lt $TimeoutSeconds) {
+        try {
+            $health = (docker inspect --format $fmt $ContainerName 2>$null)
+        }
+        catch {
+            $health = "not_found"
+        }
+        if ($health -eq "healthy") {
+            Write-Ok "$ContainerName - healthy"
+            return $true
+        }
+        Start-Sleep -Seconds 2
+        $elapsed += 2
+    }
+    Write-Fail "$ContainerName - not healthy after ${TimeoutSeconds}s (current: $health)"
+    return $false
+}
+
+# ----------------------------------------
+# Main
+# ----------------------------------------
+
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "  GOLDEN HOUSE - Start All Services"         -ForegroundColor Cyan
+$dateStr = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+Write-Host "  $dateStr"                                   -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+
+# -- Step 1: Git pull --
+Write-Step "Step 1/4 - Update repositories"
+
+Update-Repository -RepoPath $baseDir -RepoName "AnalyticsRepo (root)"
+Update-Repository -RepoPath $gatewayDir -RepoName "gateway"
+
+# -- Step 2: Gateway (nginx + auth-service + mongo) --
+Write-Step "Step 2/4 - Start Gateway"
+
+if (-not (Test-Path $gatewayDir)) {
+    Write-Fail "Gateway directory not found: $gatewayDir"
     Exit 1
 }
 
-function Update-Repository {
-    param (
-        [string]$folderPath,
-        [string]$folderName
-    )
-    
-    if (Test-Path (Join-Path -Path $folderPath -ChildPath ".git")) {
-        Write-Host "Updating git repository in $folderName..." -ForegroundColor Yellow
-        
-        Push-Location $folderPath
-        
-        # Fetch the latest changes
-        Write-Host "Running git fetch..." -ForegroundColor Yellow
-        git fetch
-        
-        # Check for fetch errors
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Git fetch failed for $folderName" -ForegroundColor Red
-            Pop-Location
-            return $false
-        }
-        
-        # Pull the latest changes
-        Write-Host "Running git pull..." -ForegroundColor Yellow
-        git pull
-        
-        # Check for pull errors
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Git pull failed for $folderName" -ForegroundColor Red
-            Pop-Location
-            return $false
-        }
-        
-        Write-Host "Repository $folderName updated successfully!" -ForegroundColor Green
-        Pop-Location
-        return $true
-    } else {
-        Write-Host "$folderName is not a git repository, skipping update" -ForegroundColor Yellow
-        return $true
+$gatewayOk = Start-DockerService -ServicePath $gatewayDir -ServiceName "gateway"
+if (-not $gatewayOk) {
+    Write-Fail "Gateway failed to start - aborting (other services depend on it)"
+    Exit 1
+}
+
+Wait-ForHealthy -ContainerName "gateway-nginx-1" -TimeoutSeconds 60
+Wait-ForHealthy -ContainerName "auth-service" -TimeoutSeconds 60
+
+# -- Step 3: Gateway sub-services --
+Write-Step "Step 3/4 - Start gateway sub-services"
+
+$monitoringDir = Join-Path $gatewayDir "monitoring-service"
+Start-DockerService -ServicePath $monitoringDir -ServiceName "monitoring-service"
+
+$notificationDir = Join-Path $gatewayDir "notification-service"
+Start-DockerService -ServicePath $notificationDir -ServiceName "notification-service"
+
+Start-Sleep -Seconds 3
+
+# -- Step 4: Application services --
+Write-Step "Step 4/4 - Start application services"
+
+$clientPath = Join-Path $baseDir "client_service"
+$apartmentPath = Join-Path $baseDir "apartment_finder"
+$referalPath = Join-Path $baseDir "referal"
+
+$appServices = @(
+    @{ Name = "client_service";   Path = $clientPath },
+    @{ Name = "apartment_finder"; Path = $apartmentPath },
+    @{ Name = "referal";          Path = $referalPath }
+)
+
+foreach ($svc in $appServices) {
+    if (Test-Path $svc.Path) {
+        Start-DockerService -ServicePath $svc.Path -ServiceName $svc.Name
+    }
+    else {
+        Write-Info "$($svc.Name) - directory not found, skipping"
     }
 }
 
-# Add this code before starting Gateway in your script
-Write-Host "Updating Gateway repository..." -ForegroundColor Yellow
-Update-Repository -folderPath $gatewayDir -folderName "Gateway"
+# ----------------------------------------
+# Summary
+# ----------------------------------------
 
-function Update-Repository {
-    param (
-        [string]$folderPath,
-        [string]$folderName
-    )
-    
-    if (Test-Path (Join-Path -Path $folderPath -ChildPath ".git")) {
-        Write-Host "Updating git repository in $folderName..." -ForegroundColor Yellow
-        
-        Push-Location $folderPath
-        
-        # Fetch the latest changes
-        Write-Host "Running git fetch..." -ForegroundColor Yellow
-        git fetch
-        
-        # Check for fetch errors
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Git fetch failed for $folderName" -ForegroundColor Red
-            Pop-Location
-            return $false
-        }
-        
-        # Pull the latest changes
-        Write-Host "Running git pull..." -ForegroundColor Yellow
-        git pull
-        
-        # Check for pull errors
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Git pull failed for $folderName" -ForegroundColor Red
-            Pop-Location
-            return $false
-        }
-        
-        Write-Host "Repository $folderName updated successfully!" -ForegroundColor Green
-        Pop-Location
-        return $true
-    } else {
-        Write-Host "$folderName is not a git repository, skipping update" -ForegroundColor Yellow
-        return $true
+$elapsedTime = (Get-Date) - $startTime
+
+Write-Host ""
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "  SUMMARY"                                    -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "  Time: $($elapsedTime.Minutes)m $($elapsedTime.Seconds)s" -ForegroundColor White
+
+if ($succeededServices.Count -gt 0) {
+    Write-Host "  OK ($($succeededServices.Count)):" -ForegroundColor Green
+    foreach ($s in $succeededServices) {
+        Write-Host "    + $s" -ForegroundColor Green
     }
 }
 
-# Step 2: Start all other services in separate terminals
-foreach ($folder in $allFolders) {
-    # Skip the gateway folder since we already handled it
-    if ($folder.Name -eq "!gateway") {
-        continue
+if ($failedServices.Count -gt 0) {
+    Write-Host "  FAILED ($($failedServices.Count)):" -ForegroundColor Red
+    foreach ($s in $failedServices) {
+        Write-Host "    - $s" -ForegroundColor Red
     }
-    if ($folder.Name -eq ".vscode") {
-        continue
-    }
-    $folderPath = $folder.FullName
-    $folderName = $folder.Name
-    
-    Update-Repository -folderPath $folderPath -folderName $folderName
-
-    # Check if docker-compose file exists
-    $dockerComposeExists = (Test-Path -Path (Join-Path -Path $folderPath -ChildPath "docker-compose.yml")) -or 
-                           (Test-Path -Path (Join-Path -Path $folderPath -ChildPath "docker-compose.yaml"))
-    
-    if (-not $dockerComposeExists) {
-        Write-Host "No docker-compose file found in $folderName - skipping" -ForegroundColor Yellow
-        continue
-    }
-    
-    Write-Host "Starting service: $folderName" -ForegroundColor Green
-    
-    # Create a script block that will run and close when done
-    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(@"
-        Set-Location '$folderPath'
-        Write-Host 'Starting Docker Compose for $folderName...'
-        docker compose up --build -d
-        if (`$LASTEXITCODE -eq 0) {
-            Write-Host 'Docker Compose for $folderName completed successfully' -ForegroundColor Green
-        } else {
-            Write-Host 'Docker Compose for $folderName failed!' -ForegroundColor Red
-            Read-Host 'Press Enter to exit'
-        }
-        # The terminal will auto-close after this command completes
-"@))
-    
-    # Start the process and add it to our tracking array
-    $process = Start-Process powershell -ArgumentList "-EncodedCommand", $encodedCommand -WindowStyle Normal -PassThru
-    $processes += $process
-    
-    # Small pause between starting services
-    Start-Sleep -Seconds 1
 }
 
-# Step 3: Wait for all processes to exit
-Write-Host "Waiting for all service terminals to complete..." -ForegroundColor Cyan
-foreach ($process in $processes) {
-    Write-Host "Waiting for process ID: $($process.Id) to complete..." -ForegroundColor Yellow
-    $process.WaitForExit()
-    Write-Host "Process ID: $($process.Id) has exited." -ForegroundColor Green
+Write-Host ""
+Write-Host "=== RUNNING CONTAINERS ===" -ForegroundColor Cyan
+$fmt = 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+docker ps --format $fmt
+
+if ($failedServices.Count -gt 0) {
+    Write-Host ""
+    Write-Host "WARNING: Some services failed to start! Check logs above." -ForegroundColor Red
+    Exit 1
 }
 
-Write-Host "All Docker Compose commands have completed!" -ForegroundColor Green
-
-# Step 4: Show running containers
-Write-Host "`n=== RUNNING CONTAINERS ===" -ForegroundColor Cyan
-docker ps -a
-
-Write-Host "`n=== ALL SERVICES STARTED ===" -ForegroundColor Cyan
-Write-Host "Press Ctrl+C to exit this script"
-
-# Keep the main script running
-try {
-    while ($true) {
-        Start-Sleep -Seconds 10
-    }
-} catch {
-    Write-Host "Script terminated."
-}
+Write-Host ""
+Write-Host "All services started successfully!" -ForegroundColor Green

@@ -1,185 +1,228 @@
 #!/bin/bash
-# filepath: c:\Users\d.tolkunov\CodeRepository\GOTOSERVER\start_all.sh
-# Script to start all Docker Compose services, starting with gateway (Ubuntu version)
+# Golden House - Start All Services
+# Start order:
+#   1. Git pull all repositories
+#   2. !gateway (nginx + auth-service + mongo)
+#   3. Wait for gateway healthcheck
+#   4. !gateway/monitoring-service
+#   5. !gateway/notification-service
+#   6. client_service
+#   7. apartment_finder
+#   8. referal
+#   9. Final status
 
-# Base directory where all services are located
+set -euo pipefail
+
 BASE_DIR="$(dirname "$(readlink -f "$0")")"
-PIDS=()
+GATEWAY_DIR="$BASE_DIR/!gateway"
+START_TIME=$(date +%s)
+FAILED_SERVICES=()
+SUCCEEDED_SERVICES=()
 
-# Color codes
+# Colors
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-WHITE='\033[1;37m'
-NC='\033[0m' # No Color
+GRAY='\033[0;90m'
+NC='\033[0m'
 
-echo -e "${CYAN}=== STARTING GOLDEN HOUSE SERVICES ===${NC}"
+# ----------------------------------------
+# Functions
+# ----------------------------------------
 
-# List all folders in the current directory
-echo -e "${CYAN}Finding all service directories...${NC}"
-ALL_FOLDERS=$(find "$BASE_DIR" -maxdepth 1 -type d -not -path "*/.git" -not -path "$BASE_DIR")
-echo -e "${WHITE}Found the following service directories:${NC}"
-for folder in $ALL_FOLDERS; do
-  echo -e "  - $(basename "$folder")"
-done
+write_step() {
+    echo ""
+    echo -e "${CYAN}>> $1${NC}"
+}
 
-# Step 1: Start Gateway First
-GATEWAY_DIR="$BASE_DIR/!gateway"
-if [ -d "$GATEWAY_DIR" ]; then
-    echo -e "${GREEN}Starting Gateway first...${NC}"
-    
-    # Start gateway and wait
-    cd "$GATEWAY_DIR" || { echo -e "${RED}Failed to enter Gateway directory${NC}"; exit 1; }
-    echo -e "${YELLOW}Executing Docker Compose in Gateway directory...${NC}"
-    docker compose up --build -d
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}Gateway services started successfully!${NC}"
-    else
-        echo -e "${RED}Failed to start Gateway. Check errors above.${NC}"
-        exit 1
-    fi
-    
-    # Return to base directory
-    cd "$BASE_DIR" || { echo -e "${RED}Failed to return to base directory${NC}"; exit 1; }
-    
-    # Small wait to ensure gateway is ready before other services
-    sleep 3
-else
-    echo -e "${RED}Gateway directory not found: $GATEWAY_DIR${NC}"
-    exit 1
-fi
+write_ok() {
+    echo -e "   ${GREEN}[OK] $1${NC}"
+}
+
+write_fail() {
+    echo -e "   ${RED}[FAIL] $1${NC}"
+}
+
+write_info() {
+    echo -e "   ${YELLOW}$1${NC}"
+}
 
 update_repository() {
     local repo_path="$1"
     local repo_name="$2"
-    
-    if [ -d "$repo_path/.git" ]; then
-        echo -e "${YELLOW}Updating git repository in $repo_name...${NC}"
-        
-        # Save current directory
-        local current_dir=$(pwd)
-        cd "$repo_path" || return 1
-        
-        # Fetch latest changes
-        echo -e "${YELLOW}Running git fetch...${NC}"
-        git fetch
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}Git fetch failed for $repo_name${NC}"
-            cd "$current_dir" || return 1
-            return 1
-        fi
-        
-        # Pull latest changes
-        echo -e "${YELLOW}Running git pull...${NC}"
-        git pull
-        if [ $? -ne 0 ]; then
-            echo -e "${RED}Git pull failed for $repo_name${NC}"
-            cd "$current_dir" || return 1
-            return 1
-        fi
-        
-        echo -e "${GREEN}Repository $repo_name updated successfully!${NC}"
-        cd "$current_dir" || return 1
-        return 0
-    else
-        echo -e "${YELLOW}$repo_name is not a git repository, skipping update${NC}"
+
+    if [ ! -d "$repo_path/.git" ]; then
+        write_info "$repo_name - not a git repo, skipping"
         return 0
     fi
+
+    write_info "Git pull $repo_name..."
+    local current_dir
+    current_dir=$(pwd)
+    cd "$repo_path" || return 1
+
+    if ! git fetch --quiet 2>/dev/null; then
+        write_fail "git fetch $repo_name"
+        cd "$current_dir" || return 1
+        return 1
+    fi
+
+    if ! git pull --quiet 2>/dev/null; then
+        write_fail "git pull $repo_name"
+        cd "$current_dir" || return 1
+        return 1
+    fi
+
+    write_ok "$repo_name updated"
+    cd "$current_dir" || return 1
+    return 0
 }
 
-# Add this code before starting Gateway
-echo -e "${YELLOW}Updating Gateway repository...${NC}"
-update_repository "$GATEWAY_DIR" "Gateway"
+start_docker_service() {
+    local service_path="$1"
+    local service_name="$2"
 
-# Step 2: Start all other services in separate terminals
-for folder in $ALL_FOLDERS; do
-    folder_name=$(basename "$folder")
-    
-    # Skip the gateway folder since we already handled it
-    if [ "$folder_name" == "!gateway" ]; then
-        continue
+    if [ ! -f "$service_path/docker-compose.yml" ] && [ ! -f "$service_path/docker-compose.yaml" ]; then
+        write_fail "$service_name - docker-compose not found in $service_path"
+        FAILED_SERVICES+=("$service_name")
+        return 1
     fi
-    if [ "$folder_name" == ".vscode" ]; then
-        continue
-    fi
-    update_repository "$folder" "$folder_name"
 
-    # Check if docker-compose file exists
-    if [ ! -f "$folder/docker-compose.yml" ] && [ ! -f "$folder/docker-compose.yaml" ]; then
-        echo -e "${YELLOW}No docker-compose file found in $folder_name - skipping${NC}"
-        continue
+    write_info "docker compose up --build -d [$service_name]..."
+    local current_dir
+    current_dir=$(pwd)
+    cd "$service_path" || return 1
+
+    if docker compose up --build -d 2>&1 | while IFS= read -r line; do echo -e "   ${GRAY}$line${NC}"; done; then
+        write_ok "$service_name started"
+        SUCCEEDED_SERVICES+=("$service_name")
+        cd "$current_dir" || return 1
+        return 0
     fi
-    
-    echo -e "${GREEN}Starting service: $folder_name${NC}"
-    
-    # Create a script to run in a new terminal
-    TMP_SCRIPT=$(mktemp)
-    cat > "$TMP_SCRIPT" << EOL
-#!/bin/bash
-cd "$folder" || exit 1
-echo "Starting Docker Compose for $folder_name..."
-docker compose up --build -d
-if [ \$? -eq 0 ]; then
-    echo -e "${GREEN}Docker Compose for $folder_name completed successfully${NC}"
-else
-    echo -e "${RED}Docker Compose for $folder_name failed!${NC}"
-    read -p "Press Enter to exit"
+
+    write_fail "$service_name - docker compose failed"
+    FAILED_SERVICES+=("$service_name")
+    cd "$current_dir" || return 1
+    return 1
+}
+
+wait_for_healthy() {
+    local container_name="$1"
+    local timeout_seconds="${2:-60}"
+
+    write_info "Waiting for healthcheck $container_name (timeout ${timeout_seconds}s)..."
+    local elapsed=0
+    local health=""
+    while [ "$elapsed" -lt "$timeout_seconds" ]; do
+        health=$(docker inspect --format='{{.State.Health.Status}}' "$container_name" 2>/dev/null || echo "not_found")
+        if [ "$health" = "healthy" ]; then
+            write_ok "$container_name - healthy"
+            return 0
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    write_fail "$container_name - not healthy after ${timeout_seconds}s (current: $health)"
+    return 1
+}
+
+# ----------------------------------------
+# Main
+# ----------------------------------------
+
+echo -e "${CYAN}============================================${NC}"
+echo -e "${CYAN}  GOLDEN HOUSE - Start All Services${NC}"
+echo -e "${CYAN}  $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+echo -e "${CYAN}============================================${NC}"
+
+# -- Step 1: Git pull --
+write_step "Step 1/4 - Update repositories"
+
+update_repository "$BASE_DIR" "AnalyticsRepo (root)"
+update_repository "$GATEWAY_DIR" "gateway"
+
+# -- Step 2: Gateway --
+write_step "Step 2/4 - Start Gateway"
+
+if [ ! -d "$GATEWAY_DIR" ]; then
+    write_fail "Gateway directory not found: $GATEWAY_DIR"
+    exit 1
 fi
-# Remove the temporary script
-rm "$TMP_SCRIPT"
-EOL
-    
-    chmod +x "$TMP_SCRIPT"
-    
-    # Start the process in a terminal and get its PID
-    if command -v gnome-terminal &> /dev/null; then
-        # For GNOME-based environments (Ubuntu default)
-        gnome-terminal -- bash -c "$TMP_SCRIPT; exec bash" &
-        PIDS+=($!)
-    elif command -v xterm &> /dev/null; then
-        # For environments with xterm
-        xterm -e "bash $TMP_SCRIPT" &
-        PIDS+=($!)
-    elif command -v konsole &> /dev/null; then
-        # For KDE environments
-        konsole -e "bash $TMP_SCRIPT" &
-        PIDS+=($!)
-    elif command -v terminator &> /dev/null; then
-        # Try terminator
-        terminator -e "bash $TMP_SCRIPT" &
-        PIDS+=($!)
+
+if ! start_docker_service "$GATEWAY_DIR" "gateway"; then
+    write_fail "Gateway failed to start - aborting (other services depend on it)"
+    exit 1
+fi
+
+wait_for_healthy "gateway-nginx-1" 60
+wait_for_healthy "auth-service" 60
+
+# -- Step 3: Gateway sub-services --
+write_step "Step 3/4 - Start gateway sub-services"
+
+start_docker_service "$GATEWAY_DIR/monitoring-service" "monitoring-service" || true
+start_docker_service "$GATEWAY_DIR/notification-service" "notification-service" || true
+
+sleep 3
+
+# -- Step 4: Application services --
+write_step "Step 4/4 - Start application services"
+
+APP_SERVICES=(
+    "client_service"
+    "apartment_finder"
+    "referal"
+)
+
+for svc in "${APP_SERVICES[@]}"; do
+    svc_path="$BASE_DIR/$svc"
+    if [ -d "$svc_path" ]; then
+        start_docker_service "$svc_path" "$svc" || true
     else
-        # Fallback to simple background execution
-        echo -e "${YELLOW}No graphical terminal found, running in background${NC}"
-        bash "$TMP_SCRIPT" &
-        PIDS+=($!)
+        write_info "$svc - directory not found, skipping"
     fi
-    
-    # Small pause between starting services
-    sleep 1
 done
 
-# Step 3: Wait for all processes to exit
-echo -e "${CYAN}Waiting for all service terminals to complete...${NC}"
-for pid in "${PIDS[@]}"; do
-    echo -e "${YELLOW}Waiting for process ID: $pid to complete...${NC}"
-    wait "$pid" 2>/dev/null || true
-    echo -e "${GREEN}Process ID: $pid has completed.${NC}"
-done
+# ----------------------------------------
+# Summary
+# ----------------------------------------
 
-echo -e "${GREEN}All Docker Compose commands have completed!${NC}"
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+MINUTES=$((ELAPSED / 60))
+SECS=$((ELAPSED % 60))
 
-# Step 4: Show running containers
-echo -e "\n${CYAN}=== RUNNING CONTAINERS ===${NC}"
-docker ps -a
+echo ""
+echo -e "${CYAN}============================================${NC}"
+echo -e "${CYAN}  SUMMARY${NC}"
+echo -e "${CYAN}============================================${NC}"
+echo -e "  Time: ${MINUTES}m ${SECS}s"
 
-echo -e "\n${CYAN}=== ALL SERVICES STARTED ===${NC}"
-echo -e "Press Ctrl+C to exit this script"
+if [ ${#SUCCEEDED_SERVICES[@]} -gt 0 ]; then
+    echo -e "  ${GREEN}OK (${#SUCCEEDED_SERVICES[@]}):${NC}"
+    for svc in "${SUCCEEDED_SERVICES[@]}"; do
+        echo -e "    ${GREEN}+ $svc${NC}"
+    done
+fi
 
-# Keep the main script running
-trap "echo -e \"\n${GREEN}Script terminated.${NC}\"; exit 0" INT
-while true; do
-    sleep 10
-done
+if [ ${#FAILED_SERVICES[@]} -gt 0 ]; then
+    echo -e "  ${RED}FAILED (${#FAILED_SERVICES[@]}):${NC}"
+    for svc in "${FAILED_SERVICES[@]}"; do
+        echo -e "    ${RED}- $svc${NC}"
+    done
+fi
+
+echo ""
+echo -e "${CYAN}=== RUNNING CONTAINERS ===${NC}"
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+if [ ${#FAILED_SERVICES[@]} -gt 0 ]; then
+    echo ""
+    echo -e "${RED}WARNING: Some services failed to start! Check logs above.${NC}"
+    exit 1
+fi
+
+echo ""
+echo -e "${GREEN}All services started successfully!${NC}"
