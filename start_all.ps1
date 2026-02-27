@@ -175,7 +175,7 @@ if (-not $gatewayOk) {
 }
 
 Wait-ForHealthy -ContainerName "gateway-nginx-1" -TimeoutSeconds 60
-Wait-ForHealthy -ContainerName "auth-service" -TimeoutSeconds 60
+Wait-ForHealthy -ContainerName "gateway-auth-service-1" -TimeoutSeconds 60
 
 # -- Step 3: Gateway sub-services --
 Write-Step "Step 3/4 - Start gateway sub-services"

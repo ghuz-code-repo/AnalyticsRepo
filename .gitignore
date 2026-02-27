@@ -6,3 +6,4 @@ migration_backup/*
 READMEs/*
 *.exe
 *.env
+!*.env.example

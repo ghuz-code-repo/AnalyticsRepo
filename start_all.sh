@@ -157,7 +157,7 @@ if ! start_docker_service "$GATEWAY_DIR" "gateway"; then
 fi
 
 wait_for_healthy "gateway-nginx-1" 60
-wait_for_healthy "auth-service" 60
+wait_for_healthy "gateway-auth-service-1" 60
 
 # -- Step 3: Gateway sub-services --
 write_step "Step 3/4 - Start gateway sub-services"
