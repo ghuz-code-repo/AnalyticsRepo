@@ -18,4 +18,4 @@
 	url = https://github.com/ghuz-code-repo/-gateway
 [submodule "auth-connector"]
 	path = auth-connector
-	url = .\\auth-connector\\
+	url = https://github.com/ghuz-code-repo/auth-connector.git
