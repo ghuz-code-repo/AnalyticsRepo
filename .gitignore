@@ -3,7 +3,13 @@ prod_backups/*
 migration_backup/*
 *.rar
 *.db
+*.sqlite
+*.sqlite3
 READMEs/*
 *.exe
 *.env
 !*.env.example
+cookies.txt
+.idea/
+__pycache__/
+*.pyc
