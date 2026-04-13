@@ -2,14 +2,13 @@
 # Golden House - Start All Services
 # Start order:
 #   1. Git pull all repositories
-#   2. !gateway (nginx + auth-service + mongo)
+#   2. !gateway (nginx + auth-service + mongo + monitoring-service)
 #   3. Wait for gateway healthcheck
-#   4. !gateway/monitoring-service
-#   5. !gateway/notification-service
-#   6. client_service
-#   7. apartment_finder
-#   8. referal
-#   9. Final status
+#   4. !gateway/notification-service
+#   5. client_service
+#   6. apartment_finder
+#   7. referal
+#   8. Final status
 
 set -euo pipefail
 
@@ -162,7 +161,7 @@ wait_for_healthy "gateway-auth-service-1" 60
 # -- Step 3: Gateway sub-services --
 write_step "Step 3/4 - Start gateway sub-services"
 
-start_docker_service "$GATEWAY_DIR/monitoring-service" "monitoring-service" || true
+# monitoring-service is already part of gateway docker-compose (Step 2)
 start_docker_service "$GATEWAY_DIR/notification-service" "notification-service" || true
 
 sleep 3

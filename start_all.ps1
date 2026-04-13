@@ -3,14 +3,13 @@
 #
 # Start order:
 #   1. Git pull all repositories
-#   2. !gateway (nginx + auth-service + mongo)
+#   2. !gateway (nginx + auth-service + mongo + monitoring-service)
 #   3. Wait for gateway healthcheck
-#   4. !gateway/monitoring-service
-#   5. !gateway/notification-service
-#   6. client_service
-#   7. apartment_finder
-#   8. referal
-#   9. Final status
+#   4. !gateway/notification-service
+#   5. client_service
+#   6. apartment_finder
+#   7. referal
+#   8. Final status
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Continue"
@@ -180,9 +179,7 @@ Wait-ForHealthy -ContainerName "gateway-auth-service-1" -TimeoutSeconds 60
 # -- Step 3: Gateway sub-services --
 Write-Step "Step 3/4 - Start gateway sub-services"
 
-$monitoringDir = Join-Path $gatewayDir "monitoring-service"
-Start-DockerService -ServicePath $monitoringDir -ServiceName "monitoring-service"
-
+# monitoring-service is already part of gateway docker-compose (Step 2)
 $notificationDir = Join-Path $gatewayDir "notification-service"
 Start-DockerService -ServicePath $notificationDir -ServiceName "notification-service"
 
