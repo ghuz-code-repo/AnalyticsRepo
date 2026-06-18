@@ -13,3 +13,4 @@ cookies.txt
 .idea/
 __pycache__/
 *.pyc
+.claude/settings.json

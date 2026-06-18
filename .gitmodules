@@ -1,19 +1,19 @@
 
 [submodule "apartment_finder"]
-	path = calculators-service
-	url = https://github.com/ghuz-code-repo/apartment_finder
+	path = apartment_finder
+	url = git@github.com-work:ghuz-code-repo/apartment_finder
 [submodule "client_service"]
-	path = calculators-service
-	url = https://github.com/ghuz-code-repo/client_service
+	path = client_service
+	url = git@github.com-work:ghuz-code-repo/client_service
 [submodule "referal"]
 	path = referal
-	url = https://github.com/ghuz-code-repo/referal
+	url = git@github.com-work:ghuz-code-repo/referal
 [submodule "!gateway"]
 	path = !gateway
-	url = https://github.com/ghuz-code-repo/-gateway
+	url = git@github.com-work:ghuz-code-repo/-gateway
 [submodule "auth-connector"]
 	path = auth-connector
-	url = https://github.com/ghuz-code-repo/auth-connector.git
+	url = git@github.com-work:ghuz-code-repo/auth-connector.git
 [submodule "scriptovod"]
 	path = scriptovod
 	url = git@github.com-work:ghuz-code-repo/scriptovod

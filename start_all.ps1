@@ -159,6 +159,23 @@ Write-Step "Step 1/4 - Update repositories"
 Update-Repository -RepoPath $baseDir -RepoName "AnalyticsRepo (root)"
 Update-Repository -RepoPath $gatewayDir -RepoName "gateway"
 
+# -- Step 1.5: Ensure shared docker networks --
+Write-Step "Step 1.5/4 - Ensure docker networks"
+
+# egress_network: vyhod k vneshnim resursam (MacroCRM MySQL i t.d.)
+# enable_icc=false - konteynery v etoy seti NE vidyat drug druga (tolko vyhod naruzhu)
+$egressExists = docker network ls --filter "name=^egress_network$" --format "{{.Name}}"
+if (-not $egressExists) {
+    docker network create --driver bridge --opt com.docker.network.bridge.enable_icc=false egress_network | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Ok "egress_network created (ICC disabled)"
+    } else {
+        Write-Fail "egress_network creation failed"
+    }
+} else {
+    Write-Ok "egress_network already exists"
+}
+
 # -- Step 2: Gateway (nginx + auth-service + mongo) --
 Write-Step "Step 2/4 - Start Gateway"
 

@@ -142,6 +142,21 @@ write_step "Step 1/4 - Update repositories"
 update_repository "$BASE_DIR" "AnalyticsRepo (root)"
 update_repository "$GATEWAY_DIR" "gateway"
 
+# -- Step 1.5: Ensure shared docker networks --
+write_step "Step 1.5/4 - Ensure docker networks"
+
+# egress_network: выход к внешним ресурсам (MacroCRM MySQL и т.д.)
+# enable_icc=false — контейнеры в этой сети НЕ видят друг друга (только выход наружу)
+if ! docker network ls --format '{{.Name}}' | grep -qx 'egress_network'; then
+    if docker network create --driver bridge --opt com.docker.network.bridge.enable_icc=false egress_network >/dev/null; then
+        write_ok "egress_network created (ICC disabled)"
+    else
+        write_fail "egress_network creation failed"
+    fi
+else
+    write_ok "egress_network already exists"
+fi
+
 # -- Step 2: Gateway --
 write_step "Step 2/4 - Start Gateway"
 
