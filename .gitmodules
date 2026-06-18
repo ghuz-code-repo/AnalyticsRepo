@@ -1,10 +1,10 @@
 
 [submodule "apartment_finder"]
 	path = apartment_finder
-	url = git@github.com-work:ghuz-code-repo/apartment_finder
+	url = git@github.com-work:ghuz-code-repo/apartment_finder.git
 [submodule "client_service"]
 	path = client_service
-	url = git@github.com-work:ghuz-code-repo/client_service
+	url = https://github.com/ghuz-code-repo/client_service.git
 [submodule "referal"]
 	path = referal
 	url = git@github.com-work:ghuz-code-repo/referal
