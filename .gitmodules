@@ -14,3 +14,6 @@
 [submodule "auth-connector"]
 	path = auth-connector
 	url = https://github.com/ghuz-code-repo/auth-connector.git
+[submodule "scriptovod"]
+	path = scriptovod
+	url = git@github.com-work:ghuz-code-repo/scriptovod
