@@ -1,214 +1,193 @@
-# Analytics Repository - Система авторизации и микросервисов
+# AnalyticsRepo — аналитическая платформа Golden House
 
-Это многосервисная система для управления аналитическими сервисами с единой системой авторизации.
+Монорепозиторий-сборка: шлюз с единой авторизацией плюс бизнес-сервисы,
+подключённые к нему как git-сабмодули.
 
 ## Архитектура
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
-│     Nginx       │────│   Auth-Service   │────│ Notification-Service│
-│   (Gateway)     │    │   (Go/MongoDB)   │    │   (Go/PostgreSQL)   │
-└─────────────────┘    └──────────────────┘    └─────────────────────┘
-         │
-         ├─── /referal ──────► Referal Service (Python/Flask)
-         ├─── /client ───────► Client Service (Python/Flask)
-         └─── /apartment ────► Apartment Finder (Python/Flask)
+                     ┌──────────────────────────────┐
+   интернет ────────►│  nginx  (public_network)     │  :80 → :443
+                     │  единственный вход снаружи   │
+                     └───────────────┬──────────────┘
+                                     │ auth_request /verify
+                     ┌───────────────▼──────────────┐   ┌──────────┐
+                     │  auth-service (Go)           ├───│  mongo   │ data_network
+                     │  пользователи, роли, права,  │   └──────────┘
+                     │  реестр сервисов, конфиг nginx│
+                     └───────┬───────────────┬──────┘
+                             │               │
+        ┌────────────────────┼───────────────┼───────────────────┐
+        │ service_network    │               │                   │
+        ▼                    ▼               ▼                   ▼
+  notification-service  notification-bot  monitoring-service   dozzle
+   (Go + PostgreSQL)     (Telegram API)     (health-опрос)    (логи, /logs)
+        │                    │                                   │
+        │ SMTP               │ egress_network              docker-socket-proxy
+        ▼                    ▼                                   │
+     почта              Telegram                          /var/run/docker.sock
+
+        service_network также ведёт в бизнес-сервисы:
+        /referal → referal   /client-service → client_service   /finder → apartment_finder
+
+        quiz_network (отдельно):  nginx ↔ quiz-backend / quiz-widget / quiz-admin
 ```
 
-## Компоненты
+Бизнес-сервис не проверяет пароли и не видит JWT: шлюз кладёт уже проверенную
+личность в заголовки `X-User-*`.
 
-### 1. Gateway (!gateway/)
-- **Auth Service** - Центральная авторизация (Go + MongoDB)
-- **Notification Service** - Отправка уведомлений (Go + PostgreSQL) 
-- **Nginx** - Обратный прокси с auth_request
+## Состав репозитория
 
-### 2. Business Services
-- **Referal** - Реферальная программа (Python/Flask)
-- **Client Service** - Управление клиентами (Python/Flask)
-- **Apartment Finder** - Поиск недвижимости (Python/Flask)
+| Каталог | Что | Сабмодуль |
+|---|---|---|
+| `docs/` | документация платформы: шлюз + контракт подключения сервисов | да |
+| `!gateway/` | шлюз: nginx, auth-service, mongo, уведомления, мониторинг, логи | да |
+| `referal/` | реферальная программа (Python/Flask) | да |
+| `client_service/` | управление клиентами (Python/Flask) | да |
+| `apartment_finder/` | подбор недвижимости (Python/Flask) | да |
+| `auth-connector/` | Python-пакет интеграции сервиса со шлюзом | да |
+| `scriptovod/` | сервис скриптов колл-центра (в разработке) | да |
+| `quiz/` | квизы для сайта gh.uz (изолированный) | нет |
+| `Hr_bot/` | HR-бот | нет |
+| `READMEs/`, `migration_backup/`, `prod_backups/` | архивы и бэкапы | нет |
 
-## Новые возможности
+## Документация
 
-### ✅ Микросервис уведомлений
-- Гарантированная доставка email с повторными попытками
-- Поддержка пачковой отправки для оптимизации производительности
-- Отслеживание статусов отправки в PostgreSQL
-- Fallback на прямую отправку при недоступности сервиса
-- Готовность к добавлению SMS и push-уведомлений
+### Шлюз
 
-### 🔄 Обновленная система авторизации
-- Все сервисы получают контекст пользователя через HTTP заголовки
-- Auth-service проверяет JWT токены через nginx auth_request
-- Единая точка управления пользователями и ролями
+Вся документация вынесена в сабмодуль **[docs/](docs/README.md)**.
+Точка входа для ИИ-агента — **[docs/AGENTS.md](docs/AGENTS.md)**.
 
-## Быстрый запуск
+По одному файлу на каждый сервис шлюза плюс сквозная архитектура:
 
-### Все сервисы с уведомлениями:
-```powershell
-# Windows
-.\start_all_with_notifications.ps1
+| Документ | О чём |
+|---|---|
+| [docs/README.md](docs/gateway/README.md) | карта сервисов, порядок запуска, известные расхождения |
+| [docs/architecture.md](docs/gateway/architecture.md) | сети, путь запроса, контракт `auth_request`, service discovery |
+| [docs/nginx.md](docs/gateway/nginx.md) | конфиги, маршруты, rate-limit, заголовки безопасности |
+| [docs/auth-service.md](docs/gateway/auth-service.md) | API, модель прав, middleware, MongoDB, переменные |
+| [docs/notification-service.md](docs/gateway/notification-service.md) | очереди каналов, приоритеты, security guard |
+| [docs/notification-bot.md](docs/gateway/notification-bot.md) | Telegram: уведомления, привязка, вход, лимиты |
+| [docs/monitoring-service.md](docs/gateway/monitoring-service.md) | опрос health, логика алертов |
+| [docs/mongo.md](docs/gateway/mongo.md) | коллекции, пользователи, бэкап |
+| [docs/dozzle.md](docs/gateway/dozzle.md) | просмотр логов и права на него |
+| [docs/docker-socket-proxy.md](docs/gateway/docker-socket-proxy.md) | разрешённые операции Docker API |
+| [docs/guard-watchdog.md](docs/gateway/guard-watchdog.md) | авто-карантин (готов, но не запущен) |
+| [docs/quiz.md](docs/gateway/quiz.md) | изолированная маршрутизация quiz |
 
-# Linux/Mac  
-./start_all_with_notifications.sh
-```
+### Подключение своего сервиса
 
-### Только gateway (auth + notifications):
+| Документ | О чём |
+|---|---|
+| [GATEWAY_SERVICE_INTEGRATION_API.md](docs/integration/GATEWAY_SERVICE_INTEGRATION_API.md) | полный справочник: контракт сервиса, заголовки, HTTP API шлюза, модель прав |
+| [AUTH_CONNECTOR_SETUP_AND_LOCAL_DEV.md](docs/integration/AUTH_CONNECTOR_SETUP_AND_LOCAL_DEV.md) | пакет `auth-connector`, подключение к Flask, локальная разработка |
+| [TELEGRAM_NOTIFICATIONS_INTEGRATION_GUIDE.md](docs/integration/TELEGRAM_NOTIFICATIONS_INTEGRATION_GUIDE.md) | уведомления в Telegram из своего сервиса |
+| [QUICKFIX_CLIENT_SERVICE_ROLES.md](QUICKFIX_CLIENT_SERVICE_ROLES.md) | восстановление ролей client-service |
+
+## Запуск
+
 ```bash
-cd !gateway
-docker-compose up -d
+./start_all.sh          # Linux/macOS
+.\start_all.ps1         # Windows
 ```
 
-## Endpoints
+Скрипт делает `git pull` по репозиториям, создаёт `egress_network`
+(с `enable_icc=false`), поднимает шлюз, ждёт его healthcheck, затем
+notification-service и бизнес-сервисы.
 
-### Главные сервисы:
-- **Главная страница**: http://localhost/
-- **Авторизация**: http://localhost/login
-- **Админ-панель**: http://localhost/admin-menu
+Только шлюз:
 
-### Business Services:
-- **Referal**: http://localhost/referal
-- **Client Service**: http://localhost/client (если настроен)
-- **Apartment Finder**: http://localhost/apartment (если настроен)
+```bash
+cd '!gateway' && docker compose up -d
+cd notification-service && docker compose up -d
+```
 
-### API:
-- **Notification API**: http://localhost:8082/api/v1/health
-- **Auth API**: http://localhost/api/
+Порядок важен: `notification-service`, бизнес-сервисы и quiz подключаются к
+сетям, которые создаёт compose шлюза.
+
+## Точки входа
+
+| URL | Что |
+|---|---|
+| `https://analytics.gh.uz/` | редирект на меню |
+| `/login`, `/login/telegram` | вход по паролю или через Telegram |
+| `/menu` | доступные пользователю сервисы |
+| `/profile` | личный кабинет: аватар, документы, привязка Telegram |
+| `/users`, `/services`, `/settings` | админка |
+| `/notification-settings` | SMTP и каналы доставки |
+| `/logs`, `/services/<key>/logs` | логи контейнеров (Dozzle) |
+| `/referal/`, `/client-service/`, `/finder/` | бизнес-сервисы (префикс = `service_key`) |
+| `/quiz/<id>`, `/quiz/admin/` | квизы и их админка |
+
+Внутренние API портов наружу не имеют: `auth-service`,
+`notification-service`, `notification-bot`, `monitoring-service` доступны
+только внутри docker-сетей.
 
 ## Конфигурация
 
-### Переменные окружения Gateway:
-```env
-# MongoDB (Auth)
-MONGO_URI=mongodb://mongo:27017
-MONGO_DB=authdb
+Секреты не в git. У каждого сервиса свой `.env`, рядом лежит `.env.example`.
 
-# SMTP для уведомлений  
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
-SMTP_FROM=your-email@gmail.com
-SMTP_USE_TLS=true
-SMTP_USE_AUTH=true
+| Файл | Ключевое |
+|---|---|
+| `!gateway/.env` | `MONGO_ROOT_PASSWORD`, `MONGO_APP_PASSWORD` |
+| `!gateway/auth-service/.env` | `MONGO_URI`, `JWT_SECRET`, `INTERNAL_API_KEY`, `BASE_URL` |
+| `!gateway/notification-service/.env` | `SERVICE_API_KEYS`, SMTP, `SERVICE_PRIORITIES` |
+| `!gateway/notification-bot/.env` | `TELEGRAM_BOT_TOKEN`, `INTERNAL_API_KEY` |
+| `!gateway/monitoring-service/.env` | `MONITORED_SERVICES`, `ALERT_*` |
 
-# JWT
-JWT_SECRET=your-jwt-secret
+Значения, которые обязаны совпадать между сервисами:
 
-# Notification Service
-NOTIFICATION_SERVICE_URL=http://notification-service:8082
+- `JWT_SECRET` — auth-service, `client_service`, `referal`;
+- `INTERNAL_API_KEY` — auth-service, notification-bot, notification-service
+  (как легаси-ключ), все вызывающие `/api/*`;
+- `MONGO_APP_PASSWORD` в `!gateway/.env` = пароль внутри `MONGO_URI`.
+
+## Уведомления
+
+Единая очередь доставки — `notification-service`. Вызывающий сервис
+**не хранит контакты**: он указывает `login` пользователя портала, а адрес
+доставки (email, `chat_id`, телефон) подставляет auth-service по запросу
+`POST /api/recipients/resolve`. Получателя вне портала задаёт поле
+`external_recipient`.
+
+```json
+POST /api/v1/notifications
+X-API-Key: <персональный ключ сервиса>
+
+{ "type": "email", "login": "ivanov", "subject": "Тема", "content": "Текст" }
 ```
 
-### Переменные окружения Notification Service:
-```env
-# PostgreSQL
-DB_HOST=notification-postgres
-DB_USER=postgres
-DB_PASSWORD=notification_password
-DB_NAME=notifications
+Каналы независимы (у каждого своя очередь, темп и повторы), у отправителей
+есть приоритетная полоса. Контракт — раздел 6
+[GATEWAY_SERVICE_INTEGRATION_API.md](docs/integration/GATEWAY_SERVICE_INTEGRATION_API.md),
+устройство — [docs/notification-service.md](docs/gateway/notification-service.md).
 
-# Processing settings
-MAX_RETRY_ATTEMPTS=3
-BATCH_SIZE=10
-DELAY_BETWEEN_BATCHES_MS=1000
-```
+Telegram-канал ведёт через `notification-bot` — **единственную** точку
+обращения к Telegram Bot API в системе.
 
-## Структура проекта
+## Диагностика
 
-```
-├── !gateway/                   # Gateway с авторизацией
-│   ├── auth-service/          # Основной сервис авторизации
-│   ├── nginx/                 # Nginx конфигурация
-│   └── docker-compose.yaml    # Контейнеры gateway
-│
-├── notification-service/       # NEW! Микросервис уведомлений
-│   ├── main.go               # HTTP API
-│   ├── processors.go         # Email/SMS/Push процессоры
-│   └── docker-compose.yml    # Standalone контейнеры
-│
-├── referal/                   # Реферальная программа
-├── client-service/            # Управление клиентами  
-├── apartment-finder/          # Поиск недвижимости
-│
-├── start_all_with_notifications.ps1  # Запуск всех сервисов
-└── NOTIFICATION_SERVICE_MIGRATION.md # Документация миграции
-```
-
-## Миграция к новой системе уведомлений
-
-Подробную документацию по миграции см. в [NOTIFICATION_SERVICE_MIGRATION.md](NOTIFICATION_SERVICE_MIGRATION.md)
-
-### Основные изменения:
-1. **Новый сервис**: notification-service для централизованной отправки
-2. **Fallback**: автоматический переход к старому методу при недоступности
-3. **Статистика**: отслеживание всех отправленных уведомлений
-4. **Масштабируемость**: поддержка пачковой отправки
-
-## Мониторинг
-
-### Проверка статуса сервисов:
 ```bash
-# Все контейнеры
-docker ps
+docker ps                                      # что поднято
+docker logs -f gateway-auth-service-1          # авторизация
+docker logs -f gateway-nginx-1                 # маршрутизация
+docker logs -f notification-service-notification-service-1
+docker logs -f gateway-notification-bot
 
-# Логи уведомлений
-docker logs gateway_notification-service_1
-
-# Логи авторизации
-docker logs gateway_auth-service_1
+# health
+curl -k https://localhost/health                          # auth-service через nginx
+docker exec gateway-nginx-1 nginx -t                      # конфиг nginx
 ```
 
-### API health checks:
-```bash
-# Notification service
-curl http://localhost:8082/api/v1/health
+Веб-просмотр логов с разграничением по сервисам — `/logs` и
+`/services/<key>/logs` (см. [docs/dozzle.md](docs/gateway/dozzle.md)).
 
-# Auth service (через nginx)
-curl http://localhost/api/health
-```
+Частые проблемы:
 
-## Troubleshooting
-
-### Notification Service недоступен:
-- Автоматический fallback на прямую отправку SMTP
-- Проверить логи: `docker logs gateway_notification-service_1`
-
-### Проблемы с авторизацией:
-- Проверить MongoDB: `docker logs gateway_mongo_1`
-- Проверить JWT настройки в .env
-
-### Проблемы с SMTP:
-- Проверить настройки в !gateway/auth-service/.env
-- Проверить статусы уведомлений в PostgreSQL
-
-## Разработка
-
-### Локальная разработка notification-service:
-```bash
-cd notification-service
-go run . # требует PostgreSQL
-```
-
-### Локальная разработка auth-service:
-```bash
-cd !gateway/auth-service  
-go run . # требует MongoDB
-```
-
-### Тестирование:
-```bash
-# Сборка notification service
-.\test_notification_build.ps1
-
-# Тестирование API
-curl -X POST http://localhost:8082/api/v1/notifications \
-  -H "Content-Type: application/json" \
-  -d '{"type":"email","recipient":"test@example.com","subject":"Test","content":"Hello"}'
-```
-
-## Следующие шаги
-
-1. **Адаптация referal сервиса** к новой системе авторизации
-2. **SMS уведомления** - интеграция с SMS провайдерами
-3. **Push уведомления** - мобильные уведомления
-4. **Метрики** - Prometheus/Grafana мониторинг
-5. **Шаблоны** - централизованное управление шаблонами уведомлений
+| Симптом | Причина |
+|---|---|
+| `502` на сервисе | контейнер не поднят; маршрут остаётся жив специально, чтобы не было 404 |
+| `404` на сервисе | сервис ни разу не регистрировался в реестре |
+| правка `.env` не подхватилась | `docker compose restart` не перечитывает `env_file` — нужен `up -d --force-recreate` |
+| `401` от notification-service | ключ сервиса не заведён в `SERVICE_API_KEYS` |
+| пустая страница вместо сервиса у админа | нет роли в сервисе; чинится рестартом auth-service (`EnsureServiceAdminRoles`) |
