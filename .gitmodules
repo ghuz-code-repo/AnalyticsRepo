@@ -17,3 +17,6 @@
 [submodule "scriptovod"]
 	path = scriptovod
 	url = git@github.com-work:ghuz-code-repo/scriptovod
+[submodule "docs"]
+	path = docs
+	url = git@github.com-work:ghuz-code-repo/docs
